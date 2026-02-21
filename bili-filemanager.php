@@ -2,14 +2,14 @@
 /**
  * PHP单文件管理器
  * 功能：文件和目录管理、压缩/解压、上传/下载、内容编辑、用户认证、响应式设计
- * 版本：1.1
+ * 版本：1.2
  */
 
 // 配置选项
 $config = array(
-    // 伪装页面口令
+    // 伪装页面口令 (首次运行时填写明文，系统会自动转换为哈希值)
     'fake_page_password' => 'admin123',
-    // 管理员账号密码
+    // 管理员账号密码 (首次运行时填写明文，系统会自动转换为哈希值)
     'admin_username' => 'admin',
     'admin_password' => 'admin123',
     // 根目录路径
@@ -17,23 +17,194 @@ $config = array(
     // 日志文件路径
     'log_file' => __DIR__ . '/filemanager.log',
     // 允许的上传文件类型
-    'allowed_extensions' => array('jpg', 'jpeg', 'png', 'gif', 'txt', 'php', 'html', 'css', 'js', 'zip', 'rar', '7z', 'pdf', 'doc', 'docx', 'xls', 'xlsx'),
+    'allowed_extensions' => array('jpg', 'jpeg', 'png', 'gif', 'txt','php', 'html', 'css', 'js', 'zip', 'rar', '7z', 'pdf', 'doc', 'docx', 'xls', 'xlsx'),
     // 最大上传文件大小 (字节)
     'max_upload_size' => 10485760, // 10MB
     // 时区设置
-    'timezone' => 'Asia/Shanghai'
+    'timezone' => 'Asia/Shanghai',
+    // 会话配置
+    'session_timeout' => 3600, // 会话超时时间（秒）
+    // CSRF令牌配置
+    'csrf_token_name' => 'csrf_token',
+    // 错误报告级别
+    'error_reporting' => E_ALL & ~E_NOTICE & ~E_DEPRECATED
 );
+
+// 自动处理密码哈希转换
+function autoHashPasswords() {
+    global $config;
+    $configFile = __FILE__;
+    
+    // 读取配置文件内容
+    $content = file_get_contents($configFile);
+    if ($content === false) {
+        error_log('Failed to read config file: ' . $configFile);
+        return false;
+    }
+    
+    $modified = false;
+    
+    // 处理管理员密码
+    $adminPassword = $config['admin_password'];
+    if (strlen($adminPassword) < 60 && strpos($adminPassword, '$') === false) {
+        // 生成新的哈希值
+        $newHash = password_hash($adminPassword, PASSWORD_DEFAULT);
+        
+        // 使用简单的字符串替换
+        $oldString = "'admin_password' => '" . $adminPassword . "'";
+        $newString = "'admin_password' => '" . $newHash . "'";
+        
+        // 尝试包含逗号的情况
+        $oldStringWithComma = $oldString . ",";
+        $newStringWithComma = $newString . ",";
+        
+        // 先尝试包含逗号的情况
+        if (strpos($content, $oldStringWithComma) !== false) {
+            $content = str_replace($oldStringWithComma, $newStringWithComma, $content);
+            $modified = true;
+        } elseif (strpos($content, $oldString) !== false) {
+            $content = str_replace($oldString, $newString, $content);
+            $modified = true;
+        }
+        
+        if ($modified) {
+            $config['admin_password'] = $newHash;
+            error_log('Converted admin_password to hash');
+        }
+    }
+    
+    // 处理伪装页面口令
+    $fakePagePassword = $config['fake_page_password'];
+    if (strlen($fakePagePassword) < 60 && strpos($fakePagePassword, '$') === false) {
+        // 生成新的哈希值
+        $newHash = password_hash($fakePagePassword, PASSWORD_DEFAULT);
+        
+        // 使用简单的字符串替换
+        $oldString = "'fake_page_password' => '" . $fakePagePassword . "'";
+        $newString = "'fake_page_password' => '" . $newHash . "'";
+        
+        // 尝试包含逗号的情况
+        $oldStringWithComma = $oldString . ",";
+        $newStringWithComma = $newString . ",";
+        
+        // 先尝试包含逗号的情况
+        if (strpos($content, $oldStringWithComma) !== false) {
+            $content = str_replace($oldStringWithComma, $newStringWithComma, $content);
+            $modified = true;
+        } elseif (strpos($content, $oldString) !== false) {
+            $content = str_replace($oldString, $newString, $content);
+            $modified = true;
+        }
+        
+        if ($modified) {
+            $config['fake_page_password'] = $newHash;
+            error_log('Converted fake_page_password to hash');
+        }
+    }
+    
+    // 只有在修改了内容的情况下才写入文件
+    if ($modified) {
+        // 检查文件是否可写
+        if (!is_writable($configFile)) {
+            error_log('Config file is not writable: ' . $configFile);
+            return false;
+        }
+        
+        // 写回配置文件
+        $result = file_put_contents($configFile, $content);
+        if ($result === false) {
+            error_log('Failed to write config file: ' . $configFile);
+            return false;
+        } else {
+            error_log('Successfully updated config file with hashed passwords');
+            return true;
+        }
+    } else {
+        error_log('No passwords needed conversion');
+    }
+    
+    return true;
+}
+
+// 检查密码是否为明文，如果是则自动转换
+function isPlainPassword($password) {
+    // 简单检测：如果密码长度小于 60，并且不包含 '$' 符号，认为是明文
+    return strlen($password) < 60 && strpos($password, '$') === false;
+}
+
+if (isPlainPassword($config['fake_page_password']) || isPlainPassword($config['admin_password'])) {
+    // 调用自动哈希转换函数
+    $result = autoHashPasswords();
+    if ($result) {
+        error_log('Auto hash conversion completed successfully');
+    } else {
+        error_log('Auto hash conversion failed');
+    }
+}
 
 // 设置时区
 date_default_timezone_set($config['timezone']);
 
+// 设置错误报告级别
+error_reporting($config['error_reporting']);
+ini_set('display_errors', 0);
+
 // 初始化会话
 session_start();
+
+// 设置会话参数
+ini_set('session.cookie_httponly', 1);
+ini_set('session.cookie_secure', 1);
+ini_set('session.use_only_cookies', 1);
+
+// 会话超时处理
+if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > $config['session_timeout'])) {
+    session_unset();
+    session_destroy();
+    session_start();
+}
+$_SESSION['last_activity'] = time();
+
+// 生成CSRF令牌
+if (!isset($_SESSION[$config['csrf_token_name']])) {
+    $_SESSION[$config['csrf_token_name']] = bin2hex(random_bytes(32));
+}
+
+// 验证密码函数
+function verifyPassword($password, $hash) {
+    // 兼容旧版本的明文密码
+    if (password_verify($password, $hash)) {
+        return true;
+    }
+    // 临时兼容明文密码，后续版本应完全移除
+    return $password === $hash;
+}
+
+// 生成密码哈希函数
+function generatePasswordHash($password) {
+    return password_hash($password, PASSWORD_DEFAULT);
+}
+
+// 验证CSRF令牌函数
+function verifyCsrfToken() {
+    global $config;
+    if (!isset($_POST[$config['csrf_token_name']]) || $_POST[$config['csrf_token_name']] !== $_SESSION[$config['csrf_token_name']]) {
+        return false;
+    }
+    return true;
+}
+
+// 生成CSRF令牌输入字段
+function csrfTokenField() {
+    global $config;
+    return '<input type="hidden" name="' . $config['csrf_token_name'] . '" value="' . $_SESSION[$config['csrf_token_name']] . '">';
+}
 
 // 错误处理
 function handleError($errno, $errstr, $errfile, $errline) {
     global $config;
-    $error = "[" . date('Y-m-d H:i:s') . "] ERROR: $errstr in $errfile on line $errline\n";
+    $relativeFile = getRelativePath($errfile);
+    $error = "[" . date('Y-m-d H:i:s') . "] ERROR: $errstr in $relativeFile on line $errline\n";
     file_put_contents($config['log_file'], $error, FILE_APPEND);
     return true;
 }
@@ -57,19 +228,32 @@ function validatePath($path) {
     global $config;
     $realRoot = realpath($config['root_path']);
     $realPath = realpath($path);
+    
+    // 检查路径是否有效
+    if (!$realPath || !$realRoot) {
+        return false;
+    }
+    
+    // 确保路径是根目录的子目录
     return strpos($realPath, $realRoot) === 0;
 }
 
 // 获取相对路径
 function getRelativePath($path) {
     global $config;
-    return str_replace(realpath($config['root_path']), '', realpath($path));
+    $realPath = realpath($path);
+    $realRoot = realpath($config['root_path']);
+    
+    if ($realPath && $realRoot) {
+        return str_replace($realRoot, '', $realPath);
+    }
+    return $path; // 如果无法解析路径，返回原始路径
 }
 
 // 伪装404页面处理
 if (!isset($_SESSION['passed_fake_page'])) {
     if (isset($_POST['fake_password'])) {
-        if ($_POST['fake_password'] === $config['fake_page_password']) {
+        if (verifyPassword($_POST['fake_password'], $config['fake_page_password'])) {
             $_SESSION['passed_fake_page'] = true;
             header('Location: ' . $_SERVER['PHP_SELF']);
             exit;
@@ -266,9 +450,11 @@ if (isset($_POST['login'])) {
     $username = $_POST['username'];
     $password = $_POST['password'];
     
-    if ($username === $config['admin_username'] && $password === $config['admin_password']) {
+    if ($username === $config['admin_username'] && verifyPassword($password, $config['admin_password'])) {
         $_SESSION['logged_in'] = true;
         $_SESSION['username'] = $username;
+        // 会话固定保护
+        session_regenerate_id(true);
         logAction('登录成功', $username);
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit;
@@ -280,7 +466,18 @@ if (isset($_POST['login'])) {
 
 // 登出处理
 if (isset($_GET['action']) && $_GET['action'] === 'logout') {
-    logAction('登出', $_SESSION['username']);
+    if (isset($_SESSION['username'])) {
+        logAction('登出', $_SESSION['username']);
+    }
+    // 完全清理会话数据
+    session_unset();
+    if (ini_get('session.use_cookies')) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000,
+            $params['path'], $params['domain'],
+            $params['secure'], $params['httponly']
+        );
+    }
     session_destroy();
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
@@ -459,6 +656,7 @@ function showLoginPage() {
                 <div class="error"><?php echo $login_error; ?></div>
             <?php endif; ?>
             <form method="POST" action="">
+                <?php echo csrfTokenField(); ?>
                 <div class="form-group">
                     <label for="username">用户名</label>
                     <input type="text" id="username" name="username" required>
@@ -480,12 +678,23 @@ function showLoginPage() {
 if (isset($_GET['action'])) {
     $action = $_GET['action'];
     
+    // 需要POST请求的操作添加CSRF验证
+    $postActions = array('create_dir', 'rename', 'copy', 'move', 'upload', 'save', 'compress', 'batch_delete');
+    if (in_array($action, $postActions) && !verifyCsrfToken()) {
+        $_SESSION['error'] = '无效的请求';
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
+    
     switch ($action) {
         case 'create_dir':
             handleCreateDir();
             break;
         case 'delete':
             handleDelete();
+            break;
+        case 'batch_delete':
+            handleBatchDelete();
             break;
         case 'rename':
             handleRename();
@@ -516,6 +725,9 @@ if (isset($_GET['action'])) {
             break;
         case 'check_extract':
             handleCheckExtract();
+            break;
+        case 'view_log':
+            handleViewLog();
             break;
     }
 }
@@ -551,8 +763,9 @@ function handleDelete() {
     if (isset($_GET['path'])) {
         $path = $_GET['path'];
         
-        // 防止删除文件管理器本身
+        // 防止删除文件管理器本身和日志文件
         $currentFile = realpath(__FILE__);
+        $logFile = realpath($GLOBALS['config']['log_file']);
         $targetPath = realpath($path);
         
         if ($targetPath === $currentFile) {
@@ -561,15 +774,24 @@ function handleDelete() {
             exit;
         }
         
+        if ($targetPath === $logFile) {
+            $_SESSION['error'] = '无法删除日志文件';
+            header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode(dirname($path)));
+            exit;
+        }
+        
         if (validatePath($path)) {
             if (is_dir($path)) {
                 // 删除目录及其内容
                 function deleteDir($dir) {
+                    $currentFile = realpath(__FILE__);
+                    $logFile = realpath($GLOBALS['config']['log_file']);
                     $files = array_diff(scandir($dir), array('.', '..'));
                     foreach ($files as $file) {
                         $path = $dir . '/' . $file;
-                        // 递归检查是否包含文件管理器本身
-                        if (realpath($path) === realpath(__FILE__)) {
+                        $realPath = realpath($path);
+                        // 递归检查是否包含文件管理器本身或日志文件
+                        if ($realPath === $currentFile || $realPath === $logFile) {
                             return false;
                         }
                         if (is_dir($path)) {
@@ -587,7 +809,7 @@ function handleDelete() {
                     logAction('删除目录', getRelativePath($path));
                     $_SESSION['message'] = '目录删除成功';
                 } else {
-                    $_SESSION['error'] = '目录删除失败，可能包含文件管理器本身';
+                    $_SESSION['error'] = '目录删除失败，可能包含受保护的文件';
                 }
             } else {
                 // 删除文件
@@ -606,6 +828,88 @@ function handleDelete() {
     exit;
 }
 
+// 批量删除文件或目录
+function handleBatchDelete() {
+    if (isset($_POST['paths']) && is_array($_POST['paths']) && isset($_POST['current_path'])) {
+        $paths = $_POST['paths'];
+        $currentPath = $_POST['current_path'];
+        $deletedCount = 0;
+        $errorCount = 0;
+        
+        // 防止删除文件管理器本身和日志文件
+        $currentFile = realpath(__FILE__);
+        $logFile = realpath($GLOBALS['config']['log_file']);
+        
+        foreach ($paths as $path) {
+            $targetPath = realpath($path);
+            
+            // 检查是否是文件管理器本身或日志文件
+            if ($targetPath === $currentFile || $targetPath === $logFile) {
+                $errorCount++;
+                continue;
+            }
+            
+            // 验证路径
+            if (validatePath($path)) {
+                if (is_dir($path)) {
+                    // 删除目录及其内容
+                    function deleteDir($dir) {
+                        $currentFile = realpath(__FILE__);
+                        $logFile = realpath($GLOBALS['config']['log_file']);
+                        $files = array_diff(scandir($dir), array('.', '..'));
+                        foreach ($files as $file) {
+                            $path = $dir . '/' . $file;
+                            $realPath = realpath($path);
+                            // 递归检查是否包含文件管理器本身或日志文件
+                            if ($realPath === $currentFile || $realPath === $logFile) {
+                                return false;
+                            }
+                            if (is_dir($path)) {
+                                if (!deleteDir($path)) {
+                                    return false;
+                                }
+                            } else {
+                                unlink($path);
+                            }
+                        }
+                        return rmdir($dir);
+                    }
+                    
+                    if (deleteDir($path)) {
+                        logAction('删除目录', getRelativePath($path));
+                        $deletedCount++;
+                    } else {
+                        $errorCount++;
+                    }
+                } else {
+                    // 删除文件
+                    if (unlink($path)) {
+                        logAction('删除文件', getRelativePath($path));
+                        $deletedCount++;
+                    } else {
+                        $errorCount++;
+                    }
+                }
+            } else {
+                $errorCount++;
+            }
+        }
+        
+        // 设置消息
+        if ($deletedCount > 0) {
+            $_SESSION['message'] = '成功删除 ' . $deletedCount . ' 个项目';
+        }
+        if ($errorCount > 0) {
+            $_SESSION['error'] = '有 ' . $errorCount . ' 个项目删除失败';
+        }
+    } else {
+        $_SESSION['error'] = '无效的请求';
+    }
+    
+    header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode($_POST['current_path']));
+    exit;
+}
+
 // 重命名文件或目录
 function handleRename() {
     if (isset($_POST['old_path']) && isset($_POST['new_name'])) {
@@ -613,12 +917,19 @@ function handleRename() {
         $newName = $_POST['new_name'];
         $newPath = dirname($oldPath) . '/' . $newName;
         
-        // 防止重命名文件管理器本身
+        // 防止重命名文件管理器本身和日志文件
         $currentFile = realpath(__FILE__);
+        $logFile = realpath($GLOBALS['config']['log_file']);
         $targetPath = realpath($oldPath);
         
         if ($targetPath === $currentFile) {
             $_SESSION['error'] = '无法重命名文件管理器本身';
+            header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode(dirname($oldPath)));
+            exit;
+        }
+        
+        if ($targetPath === $logFile) {
+            $_SESSION['error'] = '无法重命名日志文件';
             header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode(dirname($oldPath)));
             exit;
         }
@@ -648,8 +959,9 @@ function handleCopy() {
         $source = $_POST['source'];
         $destination = $_POST['destination'];
         
-        // 防止复制文件管理器本身
+        // 防止复制文件管理器本身和日志文件
         $currentFile = realpath(__FILE__);
+        $logFile = realpath($GLOBALS['config']['log_file']);
         $targetPath = realpath($source);
         
         if ($targetPath === $currentFile) {
@@ -658,10 +970,18 @@ function handleCopy() {
             exit;
         }
         
+        if ($targetPath === $logFile) {
+            $_SESSION['error'] = '无法复制日志文件';
+            header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode(dirname($source)));
+            exit;
+        }
+        
         if (validatePath($source) && validatePath($destination)) {
             if (is_dir($source)) {
                 // 复制目录
                 function copyDir($src, $dst) {
+                    $currentFile = realpath(__FILE__);
+                    $logFile = realpath($GLOBALS['config']['log_file']);
                     if (!file_exists($dst)) {
                         mkdir($dst, 0755, true);
                     }
@@ -670,8 +990,9 @@ function handleCopy() {
                         if ($file != '.' && $file != '..') {
                             $srcPath = $src . '/' . $file;
                             $dstPath = $dst . '/' . $file;
-                            // 检查是否是文件管理器本身
-                            if (realpath($srcPath) !== realpath(__FILE__)) {
+                            $realPath = realpath($srcPath);
+                            // 检查是否是文件管理器本身或日志文件
+                            if ($realPath !== $currentFile && $realPath !== $logFile) {
                                 if (is_dir($srcPath)) {
                                     copyDir($srcPath, $dstPath);
                                 } else {
@@ -709,12 +1030,19 @@ function handleMove() {
         $destination = $_POST['destination'];
         $newPath = $destination . '/' . basename($source);
         
-        // 防止移动文件管理器本身
+        // 防止移动文件管理器本身和日志文件
         $currentFile = realpath(__FILE__);
+        $logFile = realpath($GLOBALS['config']['log_file']);
         $targetPath = realpath($source);
         
         if ($targetPath === $currentFile) {
             $_SESSION['error'] = '无法移动文件管理器本身';
+            header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode(dirname($source)));
+            exit;
+        }
+        
+        if ($targetPath === $logFile) {
+            $_SESSION['error'] = '无法移动日志文件';
             header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode(dirname($source)));
             exit;
         }
@@ -740,14 +1068,61 @@ function handleMove() {
 
 // 上传文件
 function handleUpload() {
+    global $config;
+    
     if (isset($_FILES['file']) && isset($_POST['current_path'])) {
         $file = $_FILES['file'];
         $currentPath = $_POST['current_path'];
+        
+        // 规范化当前路径
+        $currentPath = realpath($currentPath);
+        
+        // 如果当前路径无效，使用根路径
+        if (!$currentPath) {
+            $currentPath = realpath($config['root_path']);
+        }
+        
+        // 确保当前路径在根路径范围内
+        if (!validatePath($currentPath)) {
+            $currentPath = realpath($config['root_path']);
+        }
+        
         $targetPath = $currentPath . '/' . basename($file['name']);
+        
+        // 检查文件上传错误
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+            switch ($file['error']) {
+                case UPLOAD_ERR_INI_SIZE:
+                    $_SESSION['error'] = '文件大小超过PHP配置限制';
+                    break;
+                case UPLOAD_ERR_FORM_SIZE:
+                    $_SESSION['error'] = '文件大小超过表单限制';
+                    break;
+                case UPLOAD_ERR_PARTIAL:
+                    $_SESSION['error'] = '文件上传不完整';
+                    break;
+                case UPLOAD_ERR_NO_FILE:
+                    $_SESSION['error'] = '未选择文件';
+                    break;
+                case UPLOAD_ERR_NO_TMP_DIR:
+                    $_SESSION['error'] = '缺少临时目录';
+                    break;
+                case UPLOAD_ERR_CANT_WRITE:
+                    $_SESSION['error'] = '文件写入失败';
+                    break;
+                case UPLOAD_ERR_EXTENSION:
+                    $_SESSION['error'] = '文件上传被扩展程序中断';
+                    break;
+                default:
+                    $_SESSION['error'] = '文件上传失败，错误代码: ' . $file['error'];
+            }
+            header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode($currentPath));
+            exit;
+        }
         
         // 检查文件大小
         if ($file['size'] > $config['max_upload_size']) {
-            $_SESSION['error'] = '文件大小超过限制';
+            $_SESSION['error'] = '文件大小超过限制 (最大 ' . formatSize($config['max_upload_size']) . ')';
             header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode($currentPath));
             exit;
         }
@@ -760,18 +1135,32 @@ function handleUpload() {
             exit;
         }
         
-        if (validatePath($targetPath)) {
-            if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-                logAction('上传文件', getRelativePath($targetPath));
-                $_SESSION['message'] = '文件上传成功';
-            } else {
-                $_SESSION['error'] = '文件上传失败';
-            }
-        } else {
-            $_SESSION['error'] = '路径无效';
+        // 确保目标目录存在
+        if (!is_dir($currentPath)) {
+            $_SESSION['error'] = '目标目录不存在';
+            header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode(dirname($currentPath)));
+            exit;
         }
+        
+        // 尝试上传文件
+        if (move_uploaded_file($file['tmp_name'], $targetPath)) {
+            logAction('上传文件', getRelativePath($targetPath));
+            $_SESSION['message'] = '文件上传成功';
+        } else {
+            $_SESSION['error'] = '文件上传失败';
+        }
+    } else {
+        $_SESSION['error'] = '无效的上传请求';
     }
-    header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode($_POST['current_path']));
+    
+    // 确保current_path存在
+    $redirectPath = isset($_POST['current_path']) ? $_POST['current_path'] : $config['root_path'];
+    // 规范化重定向路径
+    $redirectPath = realpath($redirectPath);
+    if (!$redirectPath || !validatePath($redirectPath)) {
+        $redirectPath = $config['root_path'];
+    }
+    header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode($redirectPath));
     exit;
 }
 
@@ -935,25 +1324,56 @@ function handleExtract() {
                 // 解压ZIP文件
                 $zip = new ZipArchive();
                 if ($zip->open($path) === TRUE) {
-                    // 如果需要覆盖，先删除冲突文件
-                    if ($overwrite) {
-                        for ($i = 0; $i < $zip->numFiles; $i++) {
-                            $filename = $zip->getNameIndex($i);
-                            // 跳过目录项
-                            if (substr($filename, -1) === '/') {
-                                continue;
-                            }
-                            $targetPath = $extractPath . '/' . $filename;
-                            if (file_exists($targetPath)) {
-                                unlink($targetPath);
-                            }
+                    // 检查所有文件是否会超出根目录范围
+                    $safeToExtract = true;
+                    $realExtractPath = realpath($extractPath);
+                    
+                    for ($i = 0; $i < $zip->numFiles; $i++) {
+                        $filename = $zip->getNameIndex($i);
+                        
+                        // 防止路径遍历攻击
+                        if (strpos($filename, '..') !== false) {
+                            $safeToExtract = false;
+                            break;
+                        }
+                        
+                        // 构建目标路径（不使用realpath，因为目录可能不存在）
+                        $targetPath = $realExtractPath . '/' . $filename;
+                        
+                        // 简化验证：检查目标路径是否在根目录范围内
+                        $realRoot = realpath($GLOBALS['config']['root_path']);
+                        $normalizedPath = str_replace('\\', '/', $targetPath);
+                        $normalizedRoot = str_replace('\\', '/', $realRoot);
+                        
+                        if (strpos($normalizedPath, $normalizedRoot) !== 0) {
+                            $safeToExtract = false;
+                            break;
                         }
                     }
                     
-                    $zip->extractTo($extractPath);
-                    $zip->close();
-                    logAction('解压文件', getRelativePath($path));
-                    $_SESSION['message'] = '解压成功';
+                    if ($safeToExtract) {
+                        // 如果需要覆盖，先删除冲突文件
+                        if ($overwrite) {
+                            for ($i = 0; $i < $zip->numFiles; $i++) {
+                                $filename = $zip->getNameIndex($i);
+                                // 跳过目录项
+                                if (substr($filename, -1) === '/') {
+                                    continue;
+                                }
+                                $targetPath = $extractPath . '/' . $filename;
+                                if (file_exists($targetPath) && validatePath($targetPath)) {
+                                    unlink($targetPath);
+                                }
+                            }
+                        }
+                        
+                        $zip->extractTo($extractPath);
+                        $zip->close();
+                        logAction('解压文件', getRelativePath($path));
+                        $_SESSION['message'] = '解压成功';
+                    } else {
+                        $_SESSION['error'] = '解压失败：包含超出范围的文件';
+                    }
                 } else {
                     $_SESSION['error'] = '解压失败';
                 }
@@ -965,6 +1385,151 @@ function handleExtract() {
         }
     }
     header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode($extractPath));
+    exit;
+}
+
+// 查看日志
+function handleViewLog() {
+    global $config;
+    $logFile = $config['log_file'];
+    $logContent = '';
+    
+    if (file_exists($logFile)) {
+        $logContent = file_get_contents($logFile);
+    }
+    
+    // 显示日志查看页面
+    ?>
+    <!DOCTYPE html>
+    <html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>日志查看 - 文件管理器</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background-color: #f8f8f8;
+                transition: background-color 0.3s ease;
+            }
+            .header {
+                background-color: #000;
+                color: white;
+                padding: 15px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                transition: all 0.3s ease;
+            }
+            .header h1 {
+                margin: 0;
+                font-size: 20px;
+            }
+            .header a {
+                color: white;
+                text-decoration: none;
+                background-color: #333;
+                padding: 8px 16px;
+                border-radius: 4px;
+                transition: all 0.3s ease;
+            }
+            .header a:hover {
+                background-color: #555;
+                transform: translateY(-1px);
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            }
+            .container {
+                padding: 20px;
+                max-width: 1200px;
+                margin: 0 auto;
+            }
+            .log-content {
+                background-color: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+                white-space: pre-wrap;
+                font-family: monospace;
+                font-size: 14px;
+                line-height: 1.5;
+                max-height: 600px;
+                overflow-y: auto;
+                color: #333;
+                transition: all 0.3s ease;
+            }
+            .log-content:hover {
+                box-shadow: 0 6px 30px rgba(0,0,0,0.15);
+            }
+            .log-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+                padding-bottom: 10px;
+                border-bottom: 1px solid #ddd;
+            }
+            .log-header h2 {
+                margin: 0;
+                font-size: 18px;
+                color: #000;
+            }
+            .log-info {
+                font-size: 14px;
+                color: #666;
+            }
+            .no-log {
+                text-align: center;
+                padding: 40px;
+                color: #666;
+                font-style: italic;
+            }
+            @media (max-width: 768px) {
+                .container {
+                    padding: 10px;
+                }
+                .log-content {
+                    padding: 15px;
+                    font-size: 13px;
+                }
+                .header h1 {
+                    font-size: 18px;
+                }
+                .header a {
+                    padding: 6px 12px;
+                    font-size: 14px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>文件管理器 - 日志查看</h1>
+            <a href="<?php echo $_SERVER['PHP_SELF']; ?>">返回</a>
+        </div>
+        <div class="container">
+            <div class="log-header">
+                <h2>操作日志</h2>
+                <div class="log-info">
+                    <?php if (file_exists($logFile)): ?>
+                        文件大小: <?php echo formatSize(filesize($logFile)); ?> | 最后修改: <?php echo date('Y-m-d H:i:s', filemtime($logFile)); ?>
+                    <?php else: ?>
+                        日志文件不存在
+                    <?php endif; ?>
+                </div>
+            </div>
+            <div class="log-content">
+                <?php if ($logContent): ?>
+                    <?php echo htmlspecialchars($logContent); ?>
+                <?php else: ?>
+                    <div class="no-log">暂无日志记录</div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </body>
+    </html>
+    <?php
     exit;
 }
 
@@ -1138,6 +1703,7 @@ function showEditPage($path, $content) {
             <?php endif; ?>
             <div class="edit-form">
                 <form method="POST" action="<?php echo $_SERVER['PHP_SELF']; ?>">
+                    <?php echo csrfTokenField(); ?>
                     <div class="form-group">
                         <label for="path">文件路径</label>
                         <input type="text" id="path" name="path" value="<?php echo $path; ?>" readonly style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
@@ -1172,13 +1738,15 @@ function showMainPage() {
     // 扫描目录
     $items = array();
     $currentFile = realpath(__FILE__);
+    $logFile = realpath($config['log_file']);
     if (is_dir($currentPath)) {
         $files = scandir($currentPath);
         foreach ($files as $file) {
             if ($file != '.' && $file != '..') {
                 $path = $currentPath . '/' . $file;
-                // 隐藏文件管理器本身
-                if (realpath($path) !== $currentFile) {
+                $realPath = realpath($path);
+                // 隐藏文件管理器本身和日志文件
+                if ($realPath !== $currentFile && $realPath !== $logFile) {
                     $items[] = array(
                         'name' => $file,
                         'path' => $path,
@@ -1751,10 +2319,14 @@ function showMainPage() {
                 <button id="createDir" onclick="document.getElementById('createDirForm').classList.toggle('active');">创建目录</button>
                 <button id="copyBtn" disabled>复制</button>
                 <button id="moveBtn" disabled>移动</button>
+                <button id="deleteBtn" disabled>批量删除</button>
                 <button id="compressBtn" disabled>压缩</button>
+                <a href="<?php echo $_SERVER['PHP_SELF']; ?>?action=view_log" style="padding: 8px 16px; background-color: #000; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-decoration: none;">查看日志</a>
                 
                 <!-- 上传表单 -->
                 <form class="upload-form" method="POST" action="<?php echo $_SERVER['PHP_SELF']; ?>?action=upload" enctype="multipart/form-data">
+                    <?php echo csrfTokenField(); ?>
+                    <input type="hidden" name="MAX_FILE_SIZE" value="<?php echo $config['max_upload_size']; ?>">
                     <input type="file" name="file" required>
                     <input type="hidden" name="current_path" value="<?php echo $currentPath; ?>">
                     <button type="submit">上传</button>
@@ -1764,6 +2336,7 @@ function showMainPage() {
             <!-- 创建目录表单 -->
             <div class="create-form" id="createDirForm">
                 <form method="POST" action="<?php echo $_SERVER['PHP_SELF']; ?>?action=create_dir">
+                    <?php echo csrfTokenField(); ?>
                     <input type="text" name="dir_name" placeholder="目录名称" required>
                     <input type="hidden" name="current_path" value="<?php echo $currentPath; ?>">
                     <button type="submit">创建</button>
@@ -1772,7 +2345,8 @@ function showMainPage() {
             
             <!-- 文件列表 -->
             <div class="file-list">
-                <form id="fileForm">
+                <form id="fileForm" method="POST">
+                    <?php echo csrfTokenField(); ?>
                     <table>
                         <thead>
                             <tr>
@@ -1835,6 +2409,7 @@ function showMainPage() {
             <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 30px rgba(0,0,0,0.2); width: 400px; transition: all 0.3s ease; animation: dialogFadeIn 0.3s ease;">
                 <h3 style="color: #000; margin-top: 0; transition: color 0.3s ease;">重命名</h3>
                 <form method="POST" action="<?php echo $_SERVER['PHP_SELF']; ?>?action=rename">
+                    <?php echo csrfTokenField(); ?>
                     <input type="hidden" id="renameOldPath" name="old_path">
                     <input type="text" id="renameNewName" name="new_name" placeholder="新名称" style="width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; transition: all 0.3s ease;">
                     <div style="text-align: right;">
@@ -1850,6 +2425,7 @@ function showMainPage() {
             <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 30px rgba(0,0,0,0.2); width: 400px; transition: all 0.3s ease; animation: dialogFadeIn 0.3s ease;">
                 <h3 id="copyMoveTitle" style="color: #000; margin-top: 0; transition: color 0.3s ease;">复制到</h3>
                 <form method="POST" action="<?php echo $_SERVER['PHP_SELF']; ?>" id="copyMoveForm">
+                    <?php echo csrfTokenField(); ?>
                     <input type="hidden" name="source" id="sourcePath">
                     <input type="text" name="destination" placeholder="目标路径" style="width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; transition: all 0.3s ease;">
                     <div style="text-align: right;">
@@ -1906,6 +2482,7 @@ function showMainPage() {
                 var checkedCount = document.querySelectorAll('input[name="paths[]"]:checked').length;
                 document.getElementById('copyBtn').disabled = checkedCount === 0;
                 document.getElementById('moveBtn').disabled = checkedCount === 0;
+                document.getElementById('deleteBtn').disabled = checkedCount === 0;
                 document.getElementById('compressBtn').disabled = checkedCount === 0;
             }
             
@@ -1940,6 +2517,20 @@ function showMainPage() {
                 currentPathInput.value = '<?php echo $currentPath; ?>';
                 form.appendChild(currentPathInput);
                 form.submit();
+            });
+            
+            // 批量删除功能
+            document.getElementById('deleteBtn').addEventListener('click', function() {
+                if (confirm('确定要删除选中的文件或目录吗？')) {
+                    var form = document.getElementById('fileForm');
+                    form.action = '<?php echo $_SERVER['PHP_SELF']; ?>?action=batch_delete';
+                    var currentPathInput = document.createElement('input');
+                    currentPathInput.type = 'hidden';
+                    currentPathInput.name = 'current_path';
+                    currentPathInput.value = '<?php echo $currentPath; ?>';
+                    form.appendChild(currentPathInput);
+                    form.submit();
+                }
             });
             
             // 解压确认功能
