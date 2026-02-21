@@ -2,7 +2,7 @@
 /**
  * PHP单文件管理器
  * 功能：文件和目录管理、压缩/解压、上传/下载、内容编辑、用户认证、响应式设计
- * 版本：1.0
+ * 版本：1.1
  */
 
 // 配置选项
@@ -551,6 +551,16 @@ function handleDelete() {
     if (isset($_GET['path'])) {
         $path = $_GET['path'];
         
+        // 防止删除文件管理器本身
+        $currentFile = realpath(__FILE__);
+        $targetPath = realpath($path);
+        
+        if ($targetPath === $currentFile) {
+            $_SESSION['error'] = '无法删除文件管理器本身';
+            header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode(dirname($path)));
+            exit;
+        }
+        
         if (validatePath($path)) {
             if (is_dir($path)) {
                 // 删除目录及其内容
@@ -558,7 +568,17 @@ function handleDelete() {
                     $files = array_diff(scandir($dir), array('.', '..'));
                     foreach ($files as $file) {
                         $path = $dir . '/' . $file;
-                        is_dir($path) ? deleteDir($path) : unlink($path);
+                        // 递归检查是否包含文件管理器本身
+                        if (realpath($path) === realpath(__FILE__)) {
+                            return false;
+                        }
+                        if (is_dir($path)) {
+                            if (!deleteDir($path)) {
+                                return false;
+                            }
+                        } else {
+                            unlink($path);
+                        }
                     }
                     return rmdir($dir);
                 }
@@ -567,7 +587,7 @@ function handleDelete() {
                     logAction('删除目录', getRelativePath($path));
                     $_SESSION['message'] = '目录删除成功';
                 } else {
-                    $_SESSION['error'] = '目录删除失败';
+                    $_SESSION['error'] = '目录删除失败，可能包含文件管理器本身';
                 }
             } else {
                 // 删除文件
@@ -592,6 +612,16 @@ function handleRename() {
         $oldPath = $_POST['old_path'];
         $newName = $_POST['new_name'];
         $newPath = dirname($oldPath) . '/' . $newName;
+        
+        // 防止重命名文件管理器本身
+        $currentFile = realpath(__FILE__);
+        $targetPath = realpath($oldPath);
+        
+        if ($targetPath === $currentFile) {
+            $_SESSION['error'] = '无法重命名文件管理器本身';
+            header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode(dirname($oldPath)));
+            exit;
+        }
         
         if (validatePath($oldPath) && validatePath($newPath)) {
             if (!file_exists($newPath)) {
@@ -618,6 +648,16 @@ function handleCopy() {
         $source = $_POST['source'];
         $destination = $_POST['destination'];
         
+        // 防止复制文件管理器本身
+        $currentFile = realpath(__FILE__);
+        $targetPath = realpath($source);
+        
+        if ($targetPath === $currentFile) {
+            $_SESSION['error'] = '无法复制文件管理器本身';
+            header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode(dirname($source)));
+            exit;
+        }
+        
         if (validatePath($source) && validatePath($destination)) {
             if (is_dir($source)) {
                 // 复制目录
@@ -630,10 +670,13 @@ function handleCopy() {
                         if ($file != '.' && $file != '..') {
                             $srcPath = $src . '/' . $file;
                             $dstPath = $dst . '/' . $file;
-                            if (is_dir($srcPath)) {
-                                copyDir($srcPath, $dstPath);
-                            } else {
-                                copy($srcPath, $dstPath);
+                            // 检查是否是文件管理器本身
+                            if (realpath($srcPath) !== realpath(__FILE__)) {
+                                if (is_dir($srcPath)) {
+                                    copyDir($srcPath, $dstPath);
+                                } else {
+                                    copy($srcPath, $dstPath);
+                                }
                             }
                         }
                     }
@@ -665,6 +708,16 @@ function handleMove() {
         $source = $_POST['source'];
         $destination = $_POST['destination'];
         $newPath = $destination . '/' . basename($source);
+        
+        // 防止移动文件管理器本身
+        $currentFile = realpath(__FILE__);
+        $targetPath = realpath($source);
+        
+        if ($targetPath === $currentFile) {
+            $_SESSION['error'] = '无法移动文件管理器本身';
+            header('Location: ' . $_SERVER['PHP_SELF'] . '?path=' . urlencode(dirname($source)));
+            exit;
+        }
         
         if (validatePath($source) && validatePath($newPath)) {
             if (!file_exists($newPath)) {
@@ -790,22 +843,29 @@ function handleCompress() {
         $paths = $_POST['paths'];
         $currentPath = $_POST['current_path'];
         $zipName = $currentPath . '/archive_' . date('YmdHis') . '.zip';
+        $currentFile = realpath(__FILE__);
         
         // 创建ZIP文件
         $zip = new ZipArchive();
         if ($zip->open($zipName, ZipArchive::CREATE | ZipArchive::OVERWRITE) === TRUE) {
             foreach ($paths as $path) {
                 if (validatePath($path)) {
-                    if (is_file($path)) {
-                        $zip->addFile($path, basename($path));
-                    } elseif (is_dir($path)) {
-                        // 添加目录及其内容
-                        $dir = new RecursiveDirectoryIterator($path);
-                        $iterator = new RecursiveIteratorIterator($dir);
-                        foreach ($iterator as $file) {
-                            if (!$file->isDir()) {
-                                $relativePath = str_replace($path . '/', '', $file->getPathname());
-                                $zip->addFile($file->getPathname(), basename($path) . '/' . $relativePath);
+                    // 跳过文件管理器本身
+                    if (realpath($path) !== $currentFile) {
+                        if (is_file($path)) {
+                            $zip->addFile($path, basename($path));
+                        } elseif (is_dir($path)) {
+                            // 添加目录及其内容
+                            $dir = new RecursiveDirectoryIterator($path);
+                            $iterator = new RecursiveIteratorIterator($dir);
+                            foreach ($iterator as $file) {
+                                if (!$file->isDir()) {
+                                    // 跳过文件管理器本身
+                                    if (realpath($file->getPathname()) !== $currentFile) {
+                                        $relativePath = str_replace($path . '/', '', $file->getPathname());
+                                        $zip->addFile($file->getPathname(), basename($path) . '/' . $relativePath);
+                                    }
+                                }
                             }
                         }
                     }
@@ -1111,18 +1171,22 @@ function showMainPage() {
     
     // 扫描目录
     $items = array();
+    $currentFile = realpath(__FILE__);
     if (is_dir($currentPath)) {
         $files = scandir($currentPath);
         foreach ($files as $file) {
             if ($file != '.' && $file != '..') {
                 $path = $currentPath . '/' . $file;
-                $items[] = array(
-                    'name' => $file,
-                    'path' => $path,
-                    'is_dir' => is_dir($path),
-                    'size' => is_file($path) ? filesize($path) : 0,
-                    'mtime' => filemtime($path)
-                );
+                // 隐藏文件管理器本身
+                if (realpath($path) !== $currentFile) {
+                    $items[] = array(
+                        'name' => $file,
+                        'path' => $path,
+                        'is_dir' => is_dir($path),
+                        'size' => is_file($path) ? filesize($path) : 0,
+                        'mtime' => filemtime($path)
+                    );
+                }
             }
         }
         
