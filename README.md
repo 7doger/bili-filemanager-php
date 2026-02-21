@@ -152,7 +152,3 @@ A: 日志文件默认位于 `filemanager.log`，可以使用文本编辑器查�
 
 - **项目地址**：https://github.com/7doger/bili-filemanager-php
 - **问题反馈**：https://github.com/7doger/bili-filemanager-php/issues
-
----
-
-**享受使用 PHP 单文件管理器！** 🚀
