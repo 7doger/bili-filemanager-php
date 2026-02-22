@@ -74,7 +74,7 @@ cd bili-filemanager-php
 
 ## 配置选项
 
-打开 `filemanager.php` 文件，修改以下配置选项：
+打开 `bili-filemanager.php` 文件，修改以下配置选项：
 
 ```php
 $config = array(
